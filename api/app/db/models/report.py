@@ -6,11 +6,11 @@ from app.db.database import Base
 
 
 class ReportType(str, enum.Enum):
-    ROADBLOCK = "ROADBLOCK"
-    TRAFFIC_JAM = "TRAFFIC_JAM"
-    ACCIDENT = "ACCIDENT"
-    CONSTRUCTION = "CONSTRUCTION"
-    OTHER = "OTHER"
+    ACCIDENT = "accident"
+    ROADWORK = "roadwork"
+    CLOSURE = "closure"
+    POLICE = "police"
+    OTHER = "other"
 
 
 class Report(Base):
@@ -18,7 +18,6 @@ class Report(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     type: Mapped[ReportType] = mapped_column(Enum(ReportType, name="report_type"), nullable=False, index=True)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
     latitude: Mapped[float] = mapped_column(Float, nullable=False, index=True)
     longitude: Mapped[float] = mapped_column(Float, nullable=False, index=True)
     photo_path: Mapped[str | None] = mapped_column(String(512), nullable=True)

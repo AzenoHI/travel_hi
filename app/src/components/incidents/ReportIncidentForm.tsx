@@ -3,16 +3,8 @@ import { type Resolver, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-    Box,
-    Button,
-    Card,
-    CardContent,
-    Stack,
-    Typography,
-    Snackbar,
-    Alert,
-    Avatar,
-    IconButton,
+  Box, Button, Card, CardContent, Stack, Typography,
+  Snackbar, Alert, Avatar, IconButton,
 } from "@mui/material";
 
 import TrainIcon from "@mui/icons-material/Train";
@@ -26,211 +18,135 @@ import { ENV } from "../../config/env";
 
 const MAX_IMAGE_MB = 5;
 
-// 📘 Schema walidacji
+// ✅ DOMYŚLNY PUNKT (Kraków)
+const DEFAULT_POINT = { lat: 50.067549, lng: 19.991471 };
+
+// Schema
 const schema = z.object({
-    type: z.enum(["accident", "roadwork", "closure", "police", "other"]),
-    lat: z.coerce.number().refine(Number.isFinite, "Wymagana lokalizacja"),
-    lng: z.coerce.number().refine(Number.isFinite, "Wymagana lokalizacja"),
-    photo: z
-        .union([z.instanceof(File), z.null()])
-        .optional()
-        .nullable()
-        .superRefine((f, ctx) => {
-            if (!f) return;
-            if (f.size > MAX_IMAGE_MB * 1024 * 1024) {
-                ctx.addIssue({
-                    code: z.ZodIssueCode.custom,
-                    message: `Zdjęcie do ${MAX_IMAGE_MB} MB`,
-                });
-            }
-            if (!f.type.startsWith("image/")) {
-                ctx.addIssue({
-                    code: z.ZodIssueCode.custom,
-                    message: "Dozwolone wyłącznie pliki graficzne",
-                });
-            }
-        }),
+  type: z.enum(["accident", "roadwork", "closure", "police", "other"]),
+  lat: z.coerce.number().refine(Number.isFinite, "Wymagana lokalizacja"),
+  lng: z.coerce.number().refine(Number.isFinite, "Wymagana lokalizacja"),
+  photo: z.union([z.instanceof(File), z.null()]).optional().nullable().superRefine((f, ctx) => {
+    if (!f) return;
+    if (f.size > MAX_IMAGE_MB * 1024 * 1024) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Zdjęcie do ${MAX_IMAGE_MB} MB` });
+    }
+    if (!f.type.startsWith("image/")) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Dozwolone wyłącznie pliki graficzne" });
+    }
+  }),
 });
 
 type FormValues = z.infer<typeof schema>;
 
 export const ReportIncidentForm: React.FC = () => {
-    const [toast, setToast] = useState<{
-        open: boolean;
-        msg: string;
-        severity: "success" | "error";
-    }>({
-        open: false,
-        msg: "",
-        severity: "success",
-    });
+  const [toast, setToast] = useState<{ open: boolean; msg: string; severity: "success" | "error" }>({
+    open: false, msg: "", severity: "success",
+  });
+  const [preview, setPreview] = useState<string | null>(null);
 
-    const [preview, setPreview] = useState<string | null>(null);
+  const {
+    register, handleSubmit, setValue, watch, formState: { errors, isSubmitting }, reset,
+  } = useForm<FormValues>({
+    resolver: zodResolver(schema) as Resolver<FormValues>,
+    // ✅ startujemy od DEFAULT_POINT
+    defaultValues: {
+      type: "other",
+      lat: DEFAULT_POINT.lat,
+      lng: DEFAULT_POINT.lng,
+      photo: null,
+    },
+    mode: "onBlur",
+  });
 
-    const {
-        register,
-        handleSubmit,
-        setValue,
-        watch,
-        formState: { errors, isSubmitting },
-        reset,
-    } = useForm<FormValues>({
-        resolver: zodResolver(schema) as Resolver<FormValues>,
-        defaultValues: {
-            type: "other",
-            lat: 0,
-            lng: 0,
-            photo: null,
-        },
-        mode: "onBlur",
-    });
+  const lat = watch("lat");
+  const lng = watch("lng");
+  const type = watch("type");
+  const photoWatch = watch("photo");
 
-    const lat = watch("lat");
-    const lng = watch("lng");
-    const type = watch("type");
-    const photoWatch = watch("photo");
+  useEffect(() => { if (!photoWatch) setPreview(null); }, [photoWatch]);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
-    // 🧹 Czyść preview po zmianie
-    useEffect(() => {
-        if (!photoWatch) setPreview(null);
-    }, [photoWatch]);
-
-    useEffect(() => {
-        return () => {
-            if (preview) URL.revokeObjectURL(preview);
-        };
-    }, [preview]);
-
-    // 📍 Pobierz lokalizację z przeglądarki
-    const handleUseMyLocation = () => {
-        if (!navigator.geolocation) {
-            setToast({
-                open: true,
-                msg: "Twoja przeglądarka nie obsługuje geolokalizacji.",
-                severity: "error",
-            });
-            return;
-        }
-
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                const { latitude, longitude } = pos.coords;
-                setValue("lat", latitude, { shouldValidate: true });
-                setValue("lng", longitude, { shouldValidate: true });
-                setToast({
-                    open: true,
-                    msg: "Lokalizacja ustawiona ✅",
-                    severity: "success",
-                });
-            },
-            (err) => {
-                console.error(err);
-                setToast({
-                    open: true,
-                    msg: `Nie udało się pobrać lokalizacji (${err.code}: ${err.message}).`,
-                    severity: "error",
-                });
-            }
-        );
-    };
-
-    // 🗺️ Zmiana lokalizacji z mapy
-    const onPickLocation = (p: { lat: number; lng: number }) => {
-        setValue("lat", p.lat, { shouldValidate: true });
-        setValue("lng", p.lng, { shouldValidate: true });
-    };
-
-    // 📸 Obsługa zdjęcia
-    const photoInputProps = useMemo(
-        () => ({
-            accept: "image/*",
-            onClick: (e: React.MouseEvent<HTMLInputElement>) => {
-                (e.currentTarget as HTMLInputElement).value = "";
-            },
-            onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
-                const file = e.target.files?.[0] ?? null;
-                setValue("photo", file, { shouldValidate: true });
-                if (file) {
-                    const url = URL.createObjectURL(file);
-                    setPreview((prev) => {
-                        if (prev) URL.revokeObjectURL(prev);
-                        return url;
-                    });
-                } else {
-                    setPreview(null);
-                }
-            },
-        }),
-        [setValue]
+  // 📍 „Użyj mojej lokalizacji”
+  const handleUseMyLocation = () => {
+    if (!navigator.geolocation) {
+      setToast({ open: true, msg: "Twoja przeglądarka nie obsługuje geolokalizacji.", severity: "error" });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setValue("lat", pos.coords.latitude, { shouldValidate: true });
+        setValue("lng", pos.coords.longitude, { shouldValidate: true });
+        setToast({ open: true, msg: "Lokalizacja ustawiona ✅", severity: "success" });
+      },
+      (err) => {
+        console.error(err);
+        // ❗ przy błędzie pozostajemy na DEFAULT_POINT
+        setValue("lat", DEFAULT_POINT.lat, { shouldValidate: true });
+        setValue("lng", DEFAULT_POINT.lng, { shouldValidate: true });
+        setToast({
+          open: true,
+          msg: `Nie udało się pobrać lokalizacji (${err.code}: ${err.message}). Ustawiono punkt domyślny.`,
+          severity: "error",
+        });
+      }
     );
+  };
 
-    // 🚀 Wysłanie formularza
-    const onSubmit = async (values: FormValues) => {
-        try {
-            const fd = new FormData();
-            fd.append("type", values.type);
-            fd.append("lat", String(values.lat));
-            fd.append("lng", String(values.lng));
-            const file = values.photo ?? null;
-            if (file) fd.append("photo", file);
+  // 🗺️ Zmiana z mapy
+  const onPickLocation = (p: { lat: number; lng: number }) => {
+    setValue("lat", p.lat, { shouldValidate: true });
+    setValue("lng", p.lng, { shouldValidate: true });
+  };
 
-            const res = await fetch(`${ENV.API_BASE_URL}/incidents`, {
-                method: "POST",
-                body: fd,
-            });
+  // 📸 Zdjęcie
+  const photoInputProps = useMemo(() => ({
+    accept: "image/*",
+    onClick: (e: React.MouseEvent<HTMLInputElement>) => {
+      (e.currentTarget as HTMLInputElement).value = "";
+    },
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] ?? null;
+      setValue("photo", file, { shouldValidate: true });
+      if (file) {
+        const url = URL.createObjectURL(file);
+        setPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return url; });
+      } else {
+        setPreview(null);
+      }
+    },
+  }), [setValue]);
 
-            if (!res.ok) {
-                const text = await res.text();
-                throw new Error(text || `HTTP ${res.status}`);
-            }
+  // 🚀 Submit
+  const onSubmit = async (values: FormValues) => {
+    try {
+      const fd = new FormData();
+      fd.append("type", values.type);
+      fd.append("lat", String(values.lat));
+      fd.append("lng", String(values.lng));
+      const file = values.photo ?? null;
+      if (file) fd.append("photo", file);
 
-            setToast({ open: true, msg: "Zgłoszono.", severity: "success" });
-            reset();
-            setPreview(null);
-        } catch (e: any) {
-            setToast({
-                open: true,
-                msg: e?.message ?? "Nie udało się wysłać zgłoszenia.",
-                severity: "error",
-            });
-        }
-    };
+      const res = await fetch(`${ENV.API_BASE_URL}/incidents`, { method: "POST", body: fd });
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
 
-    // 🚆 Typy zdarzeń — kolejowe
-    const incidentTypes = [
-        {
-            value: "accident" as const,
-            label: "Wypadek na torach",
-            icon: <TrainIcon />,
-            color: "#d32f2f",
-        },
-        {
-            value: "roadwork" as const,
-            label: "Roboty na torach",
-            icon: <ConstructionIcon />,
-            color: "#f57c00",
-        },
-        {
-            value: "closure" as const,
-            label: "Zamknięcie toru",
-            icon: <BlockIcon />,
-            color: "#616161",
-        },
-        {
-            value: "police" as const,
-            label: "Popsuta lokomotywa",
-            icon: <EngineeringIcon />,
-            color: "#1976d2",
-        },
-        {
-            value: "other" as const,
-            label: "Inne",
-            icon: <ReportProblemIcon />,
-            color: "#757575",
-        },
-    ];
+      setToast({ open: true, msg: "Zgłoszono.", severity: "success" });
+      reset({ type: "other", ...DEFAULT_POINT, photo: null }); // ✅ wróć do domyślnego punktu
+      setPreview(null);
+    } catch (e: any) {
+      setToast({ open: true, msg: e?.message ?? "Nie udało się wysłać zgłoszenia.", severity: "error" });
+    }
+  };
 
-    return (
+  const incidentTypes = [
+    { value: "accident" as const, label: "Wypadek na torach", icon: <TrainIcon />,       color: "#d32f2f" },
+    { value: "roadwork" as const, label: "Roboty na torach",   icon: <ConstructionIcon />, color: "#f57c00" },
+    { value: "closure"  as const, label: "Zamknięcie toru",    icon: <BlockIcon />,        color: "#616161" },
+    { value: "police"   as const, label: "Popsuta lokomotywa", icon: <EngineeringIcon />,  color: "#1976d2" },
+    { value: "other"    as const, label: "Inne",               icon: <ReportProblemIcon />,color: "#757575" },
+  ];
+
+  return (
         <Card>
             <CardContent>
                 <Typography variant="h6" sx={{ mb: 2, fontWeight: 700 }}>

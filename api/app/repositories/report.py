@@ -8,13 +8,12 @@ class ReportRepository:
         self.session = session
 
     def create(
-        self, *, type_: ReportType, description: str, lat: float, lon: float, photo_path: str | None
+        self, *, type_: ReportType, lat: float, lng: float, photo_path: str | None
     ) -> Report:
         obj = Report(
             type=type_,
-            description=description.strip(),
             latitude=lat,
-            longitude=lon,
+            longitude=lng,
             photo_path=photo_path,
         )
         self.session.add(obj)
