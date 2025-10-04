@@ -1,14 +1,14 @@
 from fastapi import FastAPI
+from dotenv import load_dotenv
 
-from .routers.v1.api import api_router
+load_dotenv()
 
-app = FastAPI(
-    title="Travel Hi API", version="1.0.0", description="API for managing travels."
-)
+from app.routers import disruptions
 
-app.include_router(api_router, prefix="/api/v1")
+app = FastAPI(title="TravelHI API", version="0.1.0")
 
+app.include_router(disruptions.router)
 
-@app.get("/health")
-async def healthcheck() -> dict[str, str]:
-    return {"status": "ok"}
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "travel_hi"}
