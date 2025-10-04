@@ -1,12 +1,14 @@
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
-load_dotenv(".env/.env")
-
+ENV_PATH = Path(__file__).resolve().parents[1] / ".envs" / ".env"
+load_dotenv(ENV_PATH)
 
 class Settings(BaseSettings):
-    DB_POOL_SIZE: int = 10
+    DB_POOL_SIZE: int =10
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_TIMEOUT: int = 30
     DB_POOL_RECYCLE: int = 1800
@@ -24,6 +26,9 @@ class Settings(BaseSettings):
     @property
     def DATABASE_URL(self) -> str:
         return "sqlite+aiosqlite:///./app.db"
+
+    class Config:
+        env_file = ENV_PATH
 
 
 settings = Settings()
