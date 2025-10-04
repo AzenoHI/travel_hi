@@ -3,3 +3,8 @@
 .idea
 .vscode
 /app/.env
+
+
+api/app.db
+app.db
+.env
