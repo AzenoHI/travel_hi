@@ -1,95 +1,109 @@
 from __future__ import annotations
-from typing import Optional, List, Pattern
+from typing import Optional, List, Set
+import os
 import re
 import unicodedata
+import logging
 
-USE_LLM_MODERATION = True
-try:
-    from pydantic import BaseModel, Field
-    from langchain_openai import ChatOpenAI
-    from langchain_core.prompts import ChatPromptTemplate
-except Exception:
-    USE_LLM_MODERATION = False
+from pydantic import BaseModel, Field
+from openai import OpenAI
 
-_PL_MAP = str.maketrans({
-    "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n", "ó": "o", "ś": "s", "ż": "z", "ź": "z",
-})
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+
+FAIL_CLOSED = os.getenv("MODERATION_FAIL_CLOSED", "false").lower() in {"1", "true", "yes"}
+
+STRICT_PROFANITY = os.getenv("STRICT_PROFANITY", "true").lower() in {"1", "true", "yes"}
+
+BLOCK_CATEGORIES: Set[str] = {
+    "harassment", "harassment/threats",
+    "hate", "hate/threats",
+    "violence", "graphic-violence",
+    "sexual", "sexual/minors",
+    "illicit-behavior", "self-harm", "self-harm/instructions",
+}
+
+_client = OpenAI()
 
 
 def _normalize(text: str) -> str:
-    t = text.strip().lower()
-    t = unicodedata.normalize("NFKD", t)
+    t = unicodedata.normalize("NFKD", text)
     t = "".join(ch for ch in t if not unicodedata.combining(ch))
-    return t.translate(_PL_MAP)
+    return t.lower()
 
 
-def _fuzzy(word: str) -> str:
-    parts = [re.escape(ch) + r"[\W_]*" for ch in word]
-    return r"\b" + "".join(parts) + r"\b"
+def _fuzzy(stem: str) -> str:
+    parts = [re.escape(ch) + r"[\W_]*" for ch in stem]
+    return r"\b" + "".join(parts)
 
 
-_BAD_WORDS = [
-    "kurwa", "chuj", "huj", "jebac", "jebany", "pierdol", "spierdalaj",
-    "skurwysyn", "pizda", "dziwka", "szmata", "cwel",
+_STRONG_PL_STEMS = [
+    "kurwa",
+    "chuj", "huj",
+    "jeb",
+    "pierdol",
+    "spierdal",
+    "skurwysyn",
+    "pizd",
 ]
 
-_FUZZY_PATTERNS: List[Pattern[str]] = [
-    re.compile(_fuzzy(w), re.IGNORECASE | re.UNICODE) for w in _BAD_WORDS
+_PROFANITY_PATTERNS = [re.compile(_fuzzy(stem), re.IGNORECASE | re.UNICODE) for stem in _STRONG_PL_STEMS]
+
+_OBFUSCATED = [
+    re.compile(r"\bk[\W_]*[*x$#]{2,}[\W_]*a\b", re.IGNORECASE | re.UNICODE),
+    re.compile(r"\bp[\W_]*[*x$#]{2,}[\W_]*d[\W_]*a\b", re.IGNORECASE | re.UNICODE),
+    re.compile(r"\bs[\W_]*pier[\W_]*[*x$#]{2,}[\W_]*aj\b", re.IGNORECASE | re.UNICODE),
 ]
 
-_OBFUSCATED_PATTERNS: List[Pattern[str]] = [
-    re.compile(r"\bk[\W_]*[*x$#]{2,}[\W_]*a\b", re.IGNORECASE | re.UNICODE),  # k***a
-    re.compile(r"\bp[\W_]*[*x$#]{2,}[\W_]*d[\W_]*a\b", re.IGNORECASE | re.UNICODE),  # p**da
-    re.compile(r"\bs[\W_]*pier[\W_]*[*x$#]{2,}[\W_]*aj\b", re.IGNORECASE | re.UNICODE),  # spier***aj
-]
+
+def _contains_strong_profanity(text: str) -> bool:
+    t = text.strip()
+    if not t:
+        return False
+    norm = _normalize(t)
+    return any(p.search(t) or p.search(norm) for p in (_PROFANITY_PATTERNS + _OBFUSCATED))
 
 
-def _looks_profanity_raw(text: str) -> bool:
-    return any(p.search(text) for p in _FUZZY_PATTERNS + _OBFUSCATED_PATTERNS)
+def _call_moderation_model(text: str):
+    try:
+        return _client.moderations.create(model="omni-moderation-latest", input=text)
+    except Exception as e_omni:
+        log.warning("omni-moderation-latest not available: %s -> fallback to text-moderation-latest", e_omni)
+        return _client.moderations.create(model="text-moderation-latest", input=text)
 
 
-def _looks_profanity(text: str) -> bool:
-    return _looks_profanity_raw(text) or _looks_profanity_raw(_normalize(text))
-
-
-if USE_LLM_MODERATION:
-    class ModerationVerdict(BaseModel):
-        allowed: bool = Field(..., description="Czy treść jest dozwolona")
-        categories: List[str] = Field(default_factory=list)
-        reasoning: str = Field(default="")
-
-
-    _mod_llm = ChatOpenAI(model="gpt-5-mini", temperature=0.0, max_tokens=160)
-    _mod_prompt = ChatPromptTemplate.from_messages([
-        ("system",
-         "Jesteś surowym moderatorem. Jeśli tekst zawiera wulgaryzmy/obelgi, mowę nienawiści, groźby przemocy "
-         "lub obraźliwy spam — uznaj za NIEDOZWOLONY. Zwracaj structured output (allowed, categories, reasoning)."),
-        ("human", "Tekst użytkownika:\n{text}\n\nPodaj werdykt.")
-    ])
-    _mod_structured = _mod_llm.with_structured_output(ModerationVerdict)
+class ModerationVerdict(BaseModel):
+    allowed: bool = Field(..., description="Czy treść jest dozwolona")
+    categories: List[str] = Field(default_factory=list)
+    reasoning: str = Field(default="")
 
 
 def moderate_text(text: Optional[str]) -> bool:
     """
     True  -> treść DOZWOLONA
-    False -> NIEDOZWOLONA (blokujemy i zwracamy None z assess_disruption)
+    False -> treść NIEDOZWOLONA
     """
     t = (text or "").strip()
     if not t:
         return True
 
-    if _looks_profanity(t):
+    if STRICT_PROFANITY and _contains_strong_profanity(t):
+        log.info("moderation local block: strong profanity matched")
         return False
 
-    if USE_LLM_MODERATION:
-        try:
-            verdict = (_mod_prompt | _mod_structured).invoke({"text": t})
-            return bool(verdict.allowed)
-        except Exception:
-
-            return True
-
-    return True
+    try:
+        resp = _call_moderation_model(t)
+        res = resp.results[0]
+        flagged = bool(getattr(res, "flagged", False))
+        categories_dict = dict(getattr(res, "categories", {}) or {})
+        active_cats = sorted([k for k, v in categories_dict.items() if v])
+        block_due_to_cats = any(c.lower() in BLOCK_CATEGORIES for c in active_cats)
+        block = flagged or block_due_to_cats
+        log.info("moderation verdict flagged=%s cats=%s", flagged, active_cats)
+        return not block
+    except Exception as e:
+        log.error("moderation error: %s (fail_closed=%s)", e, FAIL_CLOSED)
+        return not FAIL_CLOSED
 
 
 def ensure_allowed_or_none(text: Optional[str]) -> Optional[str]:
