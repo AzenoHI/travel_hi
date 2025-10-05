@@ -2,59 +2,31 @@ services:
   travel_hi_api:
     build:
       context: ./api
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile    # Twój Dockerfile API
     env_file:
-      - ./api/.envs/.env   # <-- wskazuje na PLIK, nie katalog
+      - ./api/.envs/.env
     working_dir: /api
     networks: [default]
     volumes:
-      - ./api:/api
+      - ./api:/api              # jeśli chcesz hot-reload w DEV; w PROD usuń
     healthcheck:
-      test: [ "CMD", "bash", "-lc", "curl -sf http://127.0.0.1:80/health || exit 1" ]
+      test: [ "CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1" ]
       interval: 10s
       timeout: 3s
-      retries: 10
-      start_period: 10s
+      retries: 30
+      start_period: 60s
     restart: unless-stopped
 
   frontend:
-    image: node:20-bookworm-slim
-    working_dir: /app
-    volumes:
-      - ./app:/app         # <— TU zmiana (było: ./frontend:/app)
-      - /app/node_modules
-    environment:
-      NODE_ENV: development
-      CHOKIDAR_USEPOLLING: "true"
-      VITE_API_URL: /api
-    command: >
-      sh -lc "if [ -f package-lock.json ]; then npm ci; else npm install; fi;
-      npm run dev -- --host 0.0.0.0 --port 5173"
-    expose: [ "5173" ]
-    networks: [ default ]
-    healthcheck:
-      test: [ "CMD-SHELL", "node -e 'fetch(\"http://127.0.0.1:5173/\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'" ]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 90s
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:1.27-alpine
+    build:
+      context: ./app
+      # przekaż zmienne na czas builda (Vite):
+      args:
+        VITE_API_URL: /api
     depends_on:
-      frontend: { condition: service_started }
       travel_hi_api: { condition: service_healthy }
-    ports: ["8080:80"]
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    networks: [default]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/health >/dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
+    ports:
+      - "8080:80"               # -> http://127.0.0.1:8080
     restart: unless-stopped
 
 networks:
