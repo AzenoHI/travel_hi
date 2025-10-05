@@ -82,10 +82,11 @@ export default function Register() {
             sx={{
                 display: "flex",
                 justifyContent: "center",
-                alignItems: "center",
+                alignItems: "flex-start",
                 minHeight: "100vh",
-                background:
-                    "linear-gradient(135deg, #1976d2 0%, #2196f3 50%, #42a5f5 100%)",
+                pt: 8,
+
+
             }}
         >
             <Card sx={{ maxWidth: 420, width: "100%", p: 3, boxShadow: 5 }}>

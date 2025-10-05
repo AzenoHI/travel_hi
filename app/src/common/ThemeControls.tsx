@@ -96,6 +96,9 @@ export default function ThemeControls() {
                             sx={{
                                 textTransform: "none",
                                 borderColor: "text.secondary",
+                                ml: 1,
+                                whiteSpace: "nowrap", // ⬅️ to blokuje łamanie słowa!
+
                             }}
                         >
                             Zarejestruj się
