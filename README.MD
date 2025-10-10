@@ -139,9 +139,12 @@ This repository contains both the **backend** (Python, FastAPI, Docker, SQLite) 
 
 ---
 
-## License
+## Documentation
 
-This project is released under the **MIT License** — see `LICENSE` for details.
+- [TravelHI pdf documentation HackYeah 2025](https://github.com/AzenoHI/travel_hi/blob/master/docs/TravelHI_doc.pdf)
+- [TravelHI YouTube footage](https://www.youtube.com/watch?v=gT9ua37C5Mw)
+- [Challengerocket.com overview](https://challengerocket.com/hackyeah-2025/works/travelhi-9252d3#go-pagecontent)
+- [TravelHI online](https://travel-hi-gq4w.vercel.app/)
 
 ---
 
